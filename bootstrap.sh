@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-LOG_FILE="/workspace/vast-bootstrap.log"
-mkdir -p /workspace
-exec > >(tee -a "$LOG_FILE") 2>&1
-
-info(){ echo "[BOOTSTRAP] $(date '+%H:%M:%S') $*"; }
-fail(){ echo "[BOOTSTRAP][ERROR] $(date '+%H:%M:%S') $*" >&2; }
-
 : "${WORKSPACE:=/workspace}"
 : "${PRIVATE_REPO_OWNER:?PRIVATE_REPO_OWNER fehlt}"
 : "${PRIVATE_REPO_NAME:?PRIVATE_REPO_NAME fehlt}"
 : "${PRIVATE_REPO_REF:=main}"
 : "${GITHUB_PAT:?GITHUB_PAT fehlt}"
 
+LOG_FILE="$WORKSPACE/vast-bootstrap.log"
+mkdir -p "$WORKSPACE"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+info(){ echo "[BOOTSTRAP] $(date '+%H:%M:%S') $*"; }
+err(){ echo "[BOOTSTRAP][ERROR] $(date '+%H:%M:%S') $*" >&2; }
+trap 'err "Abbruch in Zeile $LINENO: $BASH_COMMAND"' ERR
+
 API_BASE="https://api.github.com/repos/${PRIVATE_REPO_OWNER}/${PRIVATE_REPO_NAME}/contents"
-AUTH_HEADER="Authorization: Token ${GITHUB_PAT}"
+AUTH_HEADER="Authorization: token ${GITHUB_PAT}"
 ACCEPT_HEADER="Accept: application/vnd.github.raw+json"
 
 fetch_private_file() {
@@ -29,10 +30,18 @@ fetch_private_file() {
     -o "$dest"
 }
 
+info "START"
+info "WORKSPACE=$WORKSPACE"
+info "PRIVATE_REPO_OWNER=$PRIVATE_REPO_OWNER"
+info "PRIVATE_REPO_NAME=$PRIVATE_REPO_NAME"
+info "PRIVATE_REPO_REF=$PRIVATE_REPO_REF"
+
 fetch_private_file "provisioning.sh" "$WORKSPACE/provisioning.sh"
 fetch_private_file "model-list.sh" "$WORKSPACE/model-list.sh"
 fetch_private_file "configs/config.json" "$WORKSPACE/config.json"
 fetch_private_file "configs/ui-config.json" "$WORKSPACE/ui-config.json"
 
 chmod +x "$WORKSPACE/provisioning.sh" "$WORKSPACE/model-list.sh"
+
+info "Starte Provisioning"
 exec "$WORKSPACE/provisioning.sh"
