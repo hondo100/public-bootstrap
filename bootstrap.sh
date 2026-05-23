@@ -17,7 +17,7 @@ trap 'err "Abbruch in Zeile $LINENO: $BASH_COMMAND"' ERR
 
 API_BASE="https://api.github.com/repos/${PRIVATE_REPO_OWNER}/${PRIVATE_REPO_NAME}/contents"
 AUTH_HEADER="Authorization: token ${GITHUB_PAT}"
-ACCEPT_HEADER="Accept: application/vnd.github.v3.raw"
+ACCEPT_HEADER="Accept: application/vnd.github.raw+json"
 
 fetch_private_file() {
   local repo_path="$1" dest="$2"
