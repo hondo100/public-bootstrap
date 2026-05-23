@@ -4,7 +4,7 @@ set -Eeuo pipefail
 : "${WORKSPACE:=/workspace}"
 : "${PRIVATE_REPO_OWNER:?PRIVATE_REPO_OWNER fehlt}"
 : "${PRIVATE_REPO_NAME:?PRIVATE_REPO_NAME fehlt}"
-: "${PRIVATE_REPO_REF:=main}"
+: "${PRIVATE_REPO_REF:=configs}"
 : "${GITHUB_PAT:?GITHUB_PAT fehlt}"
 
 LOG_FILE="$WORKSPACE/vast-bootstrap.log"
@@ -17,7 +17,7 @@ trap 'err "Abbruch in Zeile $LINENO: $BASH_COMMAND"' ERR
 
 API_BASE="https://api.github.com/repos/${PRIVATE_REPO_OWNER}/${PRIVATE_REPO_NAME}/contents"
 AUTH_HEADER="Authorization: token ${GITHUB_PAT}"
-ACCEPT_HEADER="Accept: application/vnd.github.raw+json"
+ACCEPT_HEADER="Accept: application/vnd.github.v3.raw"
 
 fetch_private_file() {
   local repo_path="$1" dest="$2"
