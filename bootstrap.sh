@@ -4,7 +4,7 @@ set -Eeuo pipefail
 : "${WORKSPACE:=/workspace}"
 : "${PRIVATE_REPO_OWNER:?PRIVATE_REPO_OWNER fehlt}"
 : "${PRIVATE_REPO_NAME:?PRIVATE_REPO_NAME fehlt}"
-: "${PRIVATE_REPO_REF:=configs}"
+: "${PRIVATE_REPO_REF:=main}"
 : "${GITHUB_PAT:?GITHUB_PAT fehlt}"
 
 LOG_FILE="$WORKSPACE/vast-bootstrap.log"
