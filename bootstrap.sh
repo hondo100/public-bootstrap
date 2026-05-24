@@ -29,19 +29,7 @@ trap 'err "Abbruch in Zeile $LINENO: $BASH_COMMAND"' ERR
 
 API_BASE="https://api.github.com/repos/${PRIVATE_REPO_OWNER}/${PRIVATE_REPO_NAME}/contents"
 AUTH_HEADER="Authorization: token ${GITHUB_PAT}"
-ACCEPT_HEADER="Accept: application/vnd.github.v3.raw"
-
-fetch_private_file() {
-  local repo_path="$1" dest="$2"
-  mkdir -p "$(dirname "$dest")"
-  info "Hole ${repo_path} -> ${dest}"
-  curl -fsSL \
-    -H "$AUTH_HEADER" \
-    -H "$ACCEPT_HEADER" \
-    "${API_BASE}/${repo_path}?ref=${PRIVATE_REPO_REF}" \
-    -o "$dest"
-  ok "Geladen: ${repo_path}"
-}
+JSON_ACCEPT="Accept: application/vnd.github+json"
 
 start_banner() {
   echo -e "${C_GREEN}############################################################${C_RESET}"
@@ -55,6 +43,36 @@ end_banner() {
   echo -e "${C_GREEN}############################################################${C_RESET}"
 }
 
+api_json() {
+  local repo_path="$1"
+  curl -fsSL \
+    -H "$AUTH_HEADER" \
+    -H "$JSON_ACCEPT" \
+    "${API_BASE}/${repo_path}?ref=${PRIVATE_REPO_REF}"
+}
+
+fetch_private_file() {
+  local repo_path="$1" dest="$2"
+  mkdir -p "$(dirname "$dest")"
+  section "DOWNLOAD $repo_path"
+  info "Prüfe GitHub-Pfad"
+  local meta
+  meta="$(api_json "$repo_path")"
+  local path size download_url type
+  path="$(jq -r '.path // empty' <<<"$meta")"
+  size="$(jq -r '.size // empty' <<<"$meta")"
+  download_url="$(jq -r '.download_url // empty' <<<"$meta")"
+  type="$(jq -r '.type // empty' <<<"$meta")"
+
+  [[ "$type" == "file" ]] || { err "GitHub liefert keinen Dateityp für $repo_path (type=$type)"; return 1; }
+  [[ -n "$download_url" && "$download_url" != "null" ]] || { err "Keine download_url für $repo_path"; return 1; }
+
+  info "GitHub bestätigt: path=$path size=$size"
+  info "Lade Rohdatei von download_url"
+  curl -fsSL -H "$AUTH_HEADER" "$download_url" -o "$dest"
+  ok "Geladen: $repo_path -> $dest"
+}
+
 start_banner
 section "CONFIG"
 info "WORKSPACE=$WORKSPACE"
@@ -62,8 +80,18 @@ info "PRIVATE_REPO_OWNER=$PRIVATE_REPO_OWNER"
 info "PRIVATE_REPO_NAME=$PRIVATE_REPO_NAME"
 info "PRIVATE_REPO_REF=$PRIVATE_REPO_REF"
 
+section "ROOT CHECK"
+root_list="$(api_json "")"
+info "Root-Inhalt auf GitHub:"
+jq -r '.[] | "- \(.type): \(.path)"' <<<"$root_list" || true
+
 section "DOWNLOAD"
-info "Repo-Layout erwartet: provisioning.sh, model-list.sh, configs/config.json, configs/ui-config.json"
+info "Erwartete Repo-Struktur:"
+info "  - provisioning.sh"
+info "  - model-list.sh"
+info "  - configs/config.json"
+info "  - configs/ui-config.json"
+
 fetch_private_file "provisioning.sh" "$WORKSPACE/provisioning.sh"
 fetch_private_file "model-list.sh" "$WORKSPACE/model-list.sh"
 fetch_private_file "configs/config.json" "$WORKSPACE/config.json"
@@ -74,11 +102,11 @@ chmod +x "$WORKSPACE/provisioning.sh" "$WORKSPACE/model-list.sh"
 ok "Ausführungsrechte gesetzt"
 
 section "CHECK"
-[[ -s "$WORKSPACE/provisioning.sh" ]] || { err "provisioning.sh ist leer oder fehlt"; exit 1; }
-[[ -s "$WORKSPACE/model-list.sh" ]] || { err "model-list.sh ist leer oder fehlt"; exit 1; }
-[[ -s "$WORKSPACE/config.json" ]] || { err "config.json ist leer oder fehlt"; exit 1; }
-[[ -s "$WORKSPACE/ui-config.json" ]] || { err "ui-config.json ist leer oder fehlt"; exit 1; }
-ok "Alle Dateien vorhanden"
+[[ -s "$WORKSPACE/provisioning.sh" ]] || { err "provisioning.sh fehlt oder ist leer"; exit 1; }
+[[ -s "$WORKSPACE/model-list.sh" ]] || { err "model-list.sh fehlt oder ist leer"; exit 1; }
+[[ -s "$WORKSPACE/config.json" ]] || { err "config.json fehlt oder ist leer"; exit 1; }
+[[ -s "$WORKSPACE/ui-config.json" ]] || { err "ui-config.json fehlt oder ist leer"; exit 1; }
+ok "Alle Dateien vorhanden und nicht leer"
 
 section "START PROVISIONING"
 info "Starte provisioning.sh"
