@@ -82,4 +82,5 @@ ok "Alle Dateien vorhanden"
 
 section "START PROVISIONING"
 info "Starte provisioning.sh"
+end_banner
 exec "$WORKSPACE/provisioning.sh"
