@@ -2,13 +2,13 @@
 set -Eeuo pipefail
 
 : "${WORKSPACE:=/workspace}"
-: "${PRIVATE_REPO_OWNER:?PRIVATE_REPO_OWNER fehlt}"
-: "${PRIVATE_REPO_NAME:?PRIVATE_REPO_NAME fehlt}"
+: "${PRIVATE_REPO_OWNER:?"PRIVATE_REPO_OWNER fehlt"}"
+: "${PRIVATE_REPO_NAME:?"PRIVATE_REPO_NAME fehlt"}"
 : "${PRIVATE_REPO_REF:=main}"
-: "${GITHUB_PAT:?GITHUB_PAT fehlt}"
+: "${GITHUB_PAT:?"GITHUB_PAT fehlt"}"
 
-LOG_FILE="$WORKSPACE/vast-bootstrap.log"
 mkdir -p "$WORKSPACE"
+LOG_FILE="$WORKSPACE/vast-bootstrap.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 C_RESET=$'\033[0m'
@@ -28,8 +28,13 @@ section(){ echo; echo -e "${C_CYAN}========== $* ==========${C_RESET}"; }
 trap 'err "Abbruch in Zeile $LINENO: $BASH_COMMAND"' ERR
 
 API_BASE="https://api.github.com/repos/${PRIVATE_REPO_OWNER}/${PRIVATE_REPO_NAME}/contents"
-AUTH_HEADER="Authorization: token ${GITHUB_PAT}"
+AUTH_HEADER="Authorization: token $GITHUB_PAT"
 JSON_ACCEPT="Accept: application/vnd.github+json"
+
+info "WORKSPACE=$WORKSPACE"
+info "PRIVATE_REPO_OWNER=$PRIVATE_REPO_OWNER"
+info "PRIVATE_REPO_NAME=$PRIVATE_REPO_NAME"
+info "PRIVATE_REPO_REF=$PRIVATE_REPO_REF"
 
 start_banner() {
   echo -e "${C_GREEN}############################################################${C_RESET}"
@@ -51,32 +56,27 @@ api_json() {
     "${API_BASE}/${repo_path}?ref=${PRIVATE_REPO_REF}"
 }
 
-dump_meta() {
-  local label="$1" meta="$2"
-  err "Diagnose für $label:"
-  echo "$meta" | jq .
-}
-
 download_from_meta() {
   local repo_path="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
 
   section "DOWNLOAD $repo_path"
   info "Schritt 1/3: GitHub-Metadaten abrufen"
-  local meta path size download_url type
+  local meta
   if ! meta="$(api_json "$repo_path")"; then
-    err "GitHub-API fehlgeschlagen für $repo_path (ref=$PRIVATE_REPO_REF)"
+    err "API fehlgeschlagen für $repo_path"
     return 1
   fi
 
-  type="$(jq -r '.type // empty' <<<"$meta")"
-  path="$(jq -r '.path // empty' <<<"$meta")"
-  size="$(jq -r '.size // empty' <<<"$meta")"
-  download_url="$(jq -r '.download_url // empty' <<<"$meta")"
+  local type path size download_url
+  type="$(echo "$meta" | jq -r '.type // "")"
+  path="$(echo "$meta" | jq -r '.path // """)"
+  size="$(echo "$meta" | jq -r '.size // 0')"
+  download_url="$(echo "$meta" | jq -r '.download_url // ""')"
 
   if [[ "$type" != "file" || -z "$path" || -z "$download_url" || "$download_url" == "null" ]]; then
-    dump_meta "$repo_path" "$meta"
-    err "Ungültige GitHub-Metadaten für $repo_path"
+    err "Ungültige Metadaten für $repo_path"
+    echo "$meta" | jq >&2
     return 1
   fi
 
@@ -84,54 +84,42 @@ download_from_meta() {
 
   info "Schritt 2/3: Dateiinhalt von download_url holen"
   if ! curl -fsSL -H "$AUTH_HEADER" "$download_url" -o "$dest"; then
-    err "Download fehlgeschlagen für $repo_path via download_url"
+    err "Download fehlgeschlagen für $repo_path"
     return 1
   fi
 
-  info "Schritt 3/3: lokale Datei prüfen"
-  [[ -s "$dest" ]] || { err "Datei wurde geladen, ist aber leer: $dest"; return 1; }
+  info "Schritt 3/3: Datei prüfen"
+  [[ -s "$dest" ]] || { err "Datei leer: $dest"; return 1; }
 
   ok "Fertig: $repo_path -> $dest"
 }
 
 start_banner
 
-section "CONFIG"
-info "WORKSPACE=$WORKSPACE"
-info "PRIVATE_REPO_OWNER=$PRIVATE_REPO_OWNER"
-info "PRIVATE_REPO_NAME=$PRIVATE_REPO_NAME"
-info "PRIVATE_REPO_REF=$PRIVATE_REPO_REF"
-
 section "ROOT CHECK"
-info "GitHub Root-Inhalt für ref=$PRIVATE_REPO_REF"
-if root_json="$(api_json "")"; then
-  jq -r '.[] | "- \(.type): \(.path)"' <<<"$root_json" || true
-else
-  warn "Root-Inhalt konnte nicht geladen werden"
-fi
+info "Root-Inhalt für $PRIVATE_REPO_REF"
+root_json="$(api_json "" 2>/dev/null || echo "")"
+[[ -n "$root_json" ]] && echo "$root_json" | jq -r '.[] | "- \(.type): \(.path)"' || warn "Root-Inhalt fehlgeschlagen"
 
 section "DOWNLOAD PLAN"
-info "Erwartete Dateien:"
-info "  1) provisioning.sh"
-info "  2) model-list.sh"
-info "  3) configs/config.json"
-info "  4) configs/ui-config.json"
-
 download_from_meta "provisioning.sh" "$WORKSPACE/provisioning.sh"
-download_from_meta "model-list.sh" "$WORKSPACE/model-list.sh"
-download_from_meta "configs/config.json" "$WORKSPACE/config.json"
-download_from_meta "configs/ui-config.json" "$WORKSPACE/ui-config.json"
+download_from_meta "model-list.sh"    "$WORKSPACE/model-list.sh"
+download_from_meta "configs/config.json"      "$WORKSPACE/config.json"
+download_from_meta "configs/ui-config.json"   "$WORKSPACE/ui-config.json"
 
 section "PERMISSIONS"
-chmod +x "$WORKSPACE/provisioning.sh" "$WORKSPACE/model-list.sh"
+chmod +x "$WORKSPACE/provisioning.sh"
 ok "Ausführungsrechte gesetzt"
 
 section "LOCAL CHECK"
-[[ -s "$WORKSPACE/provisioning.sh" ]] || { err "provisioning.sh fehlt oder ist leer"; exit 1; }
-[[ -s "$WORKSPACE/model-list.sh" ]] || { err "model-list.sh fehlt oder ist leer"; exit 1; }
-[[ -s "$WORKSPACE/config.json" ]] || { err "config.json fehlt oder ist leer"; exit 1; }
-[[ -s "$WORKSPACE/ui-config.json" ]] || { err "ui-config.json fehlt oder ist leer"; exit 1; }
-ok "Alle Dateien sind vorhanden und nicht leer"
+[[ -s "$WORKSPACE/provisioning.sh" ]] || { err "provisioning.sh fehlt oder leer"; exit 1; }
+[[ -s "$WORKSPACE/model-list.sh" ]]    || { err "model-list.sh fehlt oder leer"; exit 1; }
+[[ -s "$WORKSPACE/config.json" ]]      || { warn "config.json fehlt oder leer"; true; }
+[[ -s "$WORKSPACE/ui-config.json" ]]   || { warn "ui-config.json fehlt oder leer"; true; }
+ok "Alle Dateien vorhanden"
+
+section "PREP WORKSPACE"
+export WORKSPACE="$WORKSPACE"   # explizit exportieren
 
 section "START PROVISIONING"
 info "Starte provisioning.sh"
