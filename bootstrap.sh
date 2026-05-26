@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# bootstrap.sh | Version: 2026-05-26.01
+# -----------------------------------------------------------------------------
 set -Eeuo pipefail
 
 : "${WORKSPACE:=/workspace}"
@@ -18,11 +21,11 @@ C_YELLOW=$'\033[1;33m'
 C_BLUE=$'\033[1;34m'
 C_CYAN=$'\033[1;36m'
 
-ts(){ date '+%H:%M:%S'; }
-info(){ echo -e "${C_BLUE}[BOOTSTRAP][INFO]${C_RESET}  [$(ts)] $*"; }
-warn(){ echo -e "${C_YELLOW}[BOOTSTRAP][WARN]${C_RESET}  [$(ts)] $*"; }
-err(){ echo -e "${C_RED}[BOOTSTRAP][ERROR]${C_RESET} [$(ts)] $*" >&2; }
-ok(){ echo -e "${C_GREEN}[BOOTSTRAP][OK]${C_RESET}    [$(ts)] $*"; }
+ts(){ date -u '+%H:%M:%S'; }
+info(){ echo -e "${C_BLUE}[BOOTSTRAP][INFO]${C_RESET}   [$(ts)] $*"; }
+warn(){ echo -e "${C_YELLOW}[BOOTSTRAP][WARN]${C_RESET}   [$(ts)] $*"; }
+err(){ echo -e "${C_RED}[BOOTSTRAP][ERROR]${C_RESET}  [$(ts)] $*" >&2; }
+ok(){ echo -e "${C_GREEN}[BOOTSTRAP][OK]${C_RESET}     [$(ts)] $*"; }
 section(){ echo; echo -e "${C_CYAN}========== $* ==========${C_RESET}"; }
 
 trap 'err "Abbruch in Zeile $LINENO: $BASH_COMMAND"' ERR
@@ -30,6 +33,7 @@ trap 'err "Abbruch in Zeile $LINENO: $BASH_COMMAND"' ERR
 API_BASE="https://api.github.com/repos/${PRIVATE_REPO_OWNER}/${PRIVATE_REPO_NAME}/contents"
 AUTH_HEADER="Authorization: token $GITHUB_PAT"
 JSON_ACCEPT="Accept: application/vnd.github+json"
+RAW_ACCEPT="Accept: application/vnd.github.v3.raw"
 
 info "WORKSPACE=$WORKSPACE"
 info "PRIVATE_REPO_OWNER=$PRIVATE_REPO_OWNER"
@@ -56,72 +60,64 @@ api_json() {
     "${API_BASE}/${repo_path}?ref=${PRIVATE_REPO_REF}"
 }
 
-download_from_meta() {
+download_file_direct() {
   local repo_path="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
 
   section "DOWNLOAD $repo_path"
-  info "Schritt 1/3: GitHub-Metadaten abrufen"
-  local meta
-  if ! meta="$(api_json "$repo_path")"; then
-    err "API fehlgeschlagen für $repo_path"
+  info "Rufe Datei via GitHub-Raw-API ab..."
+  
+  # Direkter Download des Datei-Inhalts ohne Metadaten-Parser-Umweg
+  if ! curl -fsSL \
+    -H "$AUTH_HEADER" \
+    -H "$RAW_ACCEPT" \
+    "${API_BASE}/${repo_path}?ref=${PRIVATE_REPO_REF}" \
+    -o "$dest"; then
+    err "Direct Download fehlgeschlagen für $repo_path"
     return 1
   fi
 
-  local type path size download_url
-  type="$(echo "$meta" | jq -r '.type // "")"
-  path="$(echo "$meta" | jq -r '.path // """)"
-  size="$(echo "$meta" | jq -r '.size // 0')"
-  download_url="$(echo "$meta" | jq -r '.download_url // ""')"
-
-  if [[ "$type" != "file" || -z "$path" || -z "$download_url" || "$download_url" == "null" ]]; then
-    err "Ungültige Metadaten für $repo_path"
-    echo "$meta" | jq >&2
-    return 1
-  fi
-
-  ok "GitHub bestätigt: path=$path size=$size"
-
-  info "Schritt 2/3: Dateiinhalt von download_url holen"
-  if ! curl -fsSL -H "$AUTH_HEADER" "$download_url" -o "$dest"; then
-    err "Download fehlgeschlagen für $repo_path"
-    return 1
-  fi
-
-  info "Schritt 3/3: Datei prüfen"
-  [[ -s "$dest" ]] || { err "Datei leer: $dest"; return 1; }
-
-  ok "Fertig: $repo_path -> $dest"
+  [[ -s "$dest" ]] || { err "Datei extrahiert, aber leer: $dest"; return 1; }
+  ok "Erfolgreich geladen: $repo_path -> $dest ($(stat -c %s "$dest" 2>/dev/null || echo 0) bytes)"
 }
 
 start_banner
 
 section "ROOT CHECK"
-info "Root-Inhalt für $PRIVATE_REPO_REF"
+info "Prüfe Repository-Struktur für Ref: $PRIVATE_REPO_REF"
 root_json="$(api_json "" 2>/dev/null || echo "")"
-[[ -n "$root_json" ]] && echo "$root_json" | jq -r '.[] | "- \(.type): \(.path)"' || warn "Root-Inhalt fehlgeschlagen"
+if [[ -n "$root_json" ]]; then
+  echo "$root_json" | jq -r '.[] | "- \(.type): \(.path)"'
+else
+  warn "Root-Verzeichnisstruktur konnte nicht abgefragt werden (Verbindung oder Berechtigung)."
+fi
 
 section "DOWNLOAD PLAN"
-download_from_meta "provisioning.sh" "$WORKSPACE/provisioning.sh"
-download_from_meta "model-list.sh"    "$WORKSPACE/model-list.sh"
-download_from_meta "configs/config.json"      "$WORKSPACE/config.json"
-download_from_meta "configs/ui-config.json"   "$WORKSPACE/ui-config.json"
+download_file_direct "provisioning.sh" "$WORKSPACE/provisioning.sh"
+download_file_direct "model-list.sh"    "$WORKSPACE/model-list.sh"
+download_file_direct "configs/config.json"      "$WORKSPACE/config.json"
+download_file_direct "configs/ui-config.json"   "$WORKSPACE/ui-config.json"
 
 section "PERMISSIONS"
 chmod +x "$WORKSPACE/provisioning.sh"
-ok "Ausführungsrechte gesetzt"
+ok "Ausführungsrechte für provisioning.sh gesetzt"
 
 section "LOCAL CHECK"
 [[ -s "$WORKSPACE/provisioning.sh" ]] || { err "provisioning.sh fehlt oder leer"; exit 1; }
 [[ -s "$WORKSPACE/model-list.sh" ]]    || { err "model-list.sh fehlt oder leer"; exit 1; }
 [[ -s "$WORKSPACE/config.json" ]]      || { warn "config.json fehlt oder leer"; true; }
 [[ -s "$WORKSPACE/ui-config.json" ]]   || { warn "ui-config.json fehlt oder leer"; true; }
-ok "Alle Dateien vorhanden"
+ok "Integritätsprüfung der lokalen Dateien bestanden"
 
-section "PREP WORKSPACE"
-export WORKSPACE="$WORKSPACE"   # explizit exportieren
+section "PREP ENVIRONMENT"
+export WORKSPACE
+export PRIVATE_REPO_OWNER
+export PRIVATE_REPO_NAME
+export PRIVATE_REPO_REF
 
 section "START PROVISIONING"
-info "Starte provisioning.sh"
+info "Übergebe Kontrolle an provisioning.sh via exec"
 end_banner
-exec "$WORKSPACE/provisioning.sh"
+echo ""
+
+exec "$WORKSPACE/provisioning.sh" "$@"
