@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Falls die Datei CRLF-Zeilenumbrüche hat, konvertiere sie direkt zu LF:
+sed -i 's/\r$//' "$0"
+
 # -----------------------------------------------------------------------------
 # bootstrap.sh | Version: 2026-05-26.01
 # -----------------------------------------------------------------------------
