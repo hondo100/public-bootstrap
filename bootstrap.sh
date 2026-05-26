@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 
-# Falls die Datei CRLF-Zeilenumbrüche hat, konvertiere sie direkt zu LF:
-sed -i 's/\r$//' "$0"
-
 # -----------------------------------------------------------------------------
-# bootstrap.sh | Version: 2026-05-26.01
+# bootstrap.sh | Version: 2026-05-26.02 (Vollständig inkl. Features)
 # -----------------------------------------------------------------------------
 set -Eeuo pipefail
 
@@ -46,22 +43,19 @@ info "PRIVATE_REPO_REF=$PRIVATE_REPO_REF"
 
 start_banner() {
   echo -e "${C_GREEN}############################################################${C_RESET}"
-  echo -e "${C_GREEN}#                      BOOTSTRAP START                     #${C_RESET}"
+  echo -e "${C_GREEN}#                       BOOTSTRAP START                    #${C_RESET}"
   echo -e "${C_GREEN}############################################################${C_RESET}"
 }
 
 end_banner() {
   echo -e "${C_GREEN}############################################################${C_RESET}"
-  echo -e "${C_GREEN}#                       BOOTSTRAP END                      #${C_RESET}"
+  echo -e "${C_GREEN}#                        BOOTSTRAP END                     #${C_RESET}"
   echo -e "${C_GREEN}############################################################${C_RESET}"
 }
 
 api_json() {
   local repo_path="$1"
-  curl -fsSL \
-    -H "$AUTH_HEADER" \
-    -H "$JSON_ACCEPT" \
-    "${API_BASE}/${repo_path}?ref=${PRIVATE_REPO_REF}"
+  curl -fsSL -H "$AUTH_HEADER" -H "$JSON_ACCEPT" "${API_BASE}/${repo_path}?ref=${PRIVATE_REPO_REF}"
 }
 
 download_file_direct() {
@@ -71,15 +65,13 @@ download_file_direct() {
   section "DOWNLOAD $repo_path"
   info "Rufe Datei via GitHub-Raw-API ab..."
   
-  # Direkter Download des Datei-Inhalts ohne Metadaten-Parser-Umweg
-  if ! curl -fsSL \
-    -H "$AUTH_HEADER" \
-    -H "$RAW_ACCEPT" \
-    "${API_BASE}/${repo_path}?ref=${PRIVATE_REPO_REF}" \
-    -o "$dest"; then
+  if ! curl -fsSL -H "$AUTH_HEADER" -H "$RAW_ACCEPT" "${API_BASE}/${repo_path}?ref=${PRIVATE_REPO_REF}" -o "$dest"; then
     err "Direct Download fehlgeschlagen für $repo_path"
     return 1
   fi
+
+  # FIX: Konvertierung sofort nach dem Download
+  sed -i 's/\r$//' "$dest"
 
   [[ -s "$dest" ]] || { err "Datei extrahiert, aber leer: $dest"; return 1; }
   ok "Erfolgreich geladen: $repo_path -> $dest ($(stat -c %s "$dest" 2>/dev/null || echo 0) bytes)"
@@ -93,31 +85,26 @@ root_json="$(api_json "" 2>/dev/null || echo "")"
 if [[ -n "$root_json" ]]; then
   echo "$root_json" | jq -r '.[] | "- \(.type): \(.path)"'
 else
-  warn "Root-Verzeichnisstruktur konnte nicht abgefragt werden (Verbindung oder Berechtigung)."
+  warn "Root-Verzeichnisstruktur konnte nicht abgefragt werden."
 fi
 
 section "DOWNLOAD PLAN"
 download_file_direct "provisioning.sh" "$WORKSPACE/provisioning.sh"
-download_file_direct "model-list.sh"    "$WORKSPACE/model-list.sh"
-download_file_direct "configs/config.json"      "$WORKSPACE/config.json"
-download_file_direct "configs/ui-config.json"   "$WORKSPACE/ui-config.json"
+download_file_direct "model-list.sh" "$WORKSPACE/model-list.sh"
+download_file_direct "configs/config.json" "$WORKSPACE/config.json"
+download_file_direct "configs/ui-config.json" "$WORKSPACE/ui-config.json"
 
 section "PERMISSIONS"
 chmod +x "$WORKSPACE/provisioning.sh"
 ok "Ausführungsrechte für provisioning.sh gesetzt"
 
 section "LOCAL CHECK"
-[[ -s "$WORKSPACE/provisioning.sh" ]] || { err "provisioning.sh fehlt oder leer"; exit 1; }
-[[ -s "$WORKSPACE/model-list.sh" ]]    || { err "model-list.sh fehlt oder leer"; exit 1; }
-[[ -s "$WORKSPACE/config.json" ]]      || { warn "config.json fehlt oder leer"; true; }
-[[ -s "$WORKSPACE/ui-config.json" ]]   || { warn "ui-config.json fehlt oder leer"; true; }
-ok "Integritätsprüfung der lokalen Dateien bestanden"
+[[ -s "$WORKSPACE/provisioning.sh" ]] || { err "provisioning.sh fehlt"; exit 1; }
+[[ -s "$WORKSPACE/model-list.sh" ]] || { err "model-list.sh fehlt"; exit 1; }
+ok "Integritätsprüfung bestanden"
 
 section "PREP ENVIRONMENT"
-export WORKSPACE
-export PRIVATE_REPO_OWNER
-export PRIVATE_REPO_NAME
-export PRIVATE_REPO_REF
+export WORKSPACE PRIVATE_REPO_OWNER PRIVATE_REPO_NAME PRIVATE_REPO_REF
 
 section "START PROVISIONING"
 info "Übergebe Kontrolle an provisioning.sh via exec"
