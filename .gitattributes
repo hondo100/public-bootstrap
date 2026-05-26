@@ -1,0 +1,8 @@
+# Erzwinge LF für alle Shell-Skripte und Konfigurationsdateien
+*.sh text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Falls du weitere Dateien hast, die Linux-Format benötigen
+*.md text eol=lf
